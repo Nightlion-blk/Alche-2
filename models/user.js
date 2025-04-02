@@ -24,16 +24,22 @@ class user{
           const result = await connection.execute(
             'SELECT * FROM E_COMMERCE_USERS WHERE EMAIL = :email',
             { email },
+
             { outFormat: oracledb.OUT_FORMAT_OBJECT }
+
           );
           if (result.rows.length === 0) {
             return { success: false, message: 'Email not found' };
           }
+
           const user = result.rows[0];
+
           const validPassword = await bcrypt.compare(password, user.PASSWORD);
+
           if (!validPassword) {
             return { success: false, message: 'Invalid password' };
           }
+
           return { success: true, user };
         } catch (err) {
           console.error('Error fetching user:', err);
@@ -49,3 +55,5 @@ class user{
      }
     }
 };
+
+module.exports = user;
