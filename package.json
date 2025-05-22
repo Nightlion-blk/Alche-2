@@ -7,7 +7,7 @@
   },
   "scripts": {
     "start": "node backend/server.js",
-    "heroku-postbuild": "cd frontend && npm install && npm run build"
+    "heroku-postbuild": "cd frontend && npm install autoprefixer tailwindcss postcss --no-save && npm install && npm run build"
   },
   "dependencies": {
     "express": "^4.21.2",
