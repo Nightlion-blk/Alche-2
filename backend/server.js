@@ -21,7 +21,7 @@ const app = express();
 const port = process.env.PORT || 8080;
 
 // Define custom React build path (adjust to match your actual structure)
-const REACT_BUILD_PATH = process.env.REACT_BUILD_PATH || path.join(__dirname, '../frontend/build');
+const REACT_BUILD_PATH = process.env.REACT_BUILD_PATH || path.join(__dirname, '../frontend/dist');
 
 // Connect to MongoDB
 mongoose.connect(process.env.MONGO_URI, {
@@ -32,7 +32,7 @@ mongoose.connect(process.env.MONGO_URI, {
 .catch(err => console.error('MongoDB connection error:', err));
 
 // Middleware
-app.use(cors());
+app.use(cors({}));
 app.use(express.json({limit: '50mb'}));
 app.use(bodyParser.urlencoded({ extended: true }));
 
