@@ -7,12 +7,12 @@ const AuthUserRoute = require('./routes/AuthUserRoute.js');
 const productRoute = require('./routes/productRoute.js');
 const cartRouter = require('./routes/cartRoute.js');
 const checkoutRoute = require('./routes/checkoutRoute.js');
-const webhookRoute = require('./routes/WebHook.js');
+const webhookRoute = require('./routes/webHook.js');
 const order = require('./routes/orderRoutes');
-const cake = require('./routes/cakeRoute.js');
+const cakeRoute = require('./routes/cakeRoute.js');
 const Otp = require('./middleware/Otp.js');
 //const modelsRoutes = require('./routes/ModelsRoutes.js');
-require('dotenv').config({ path: './access.env' });
+require('dotenv').config({ path: path.resolve(__dirname, './access.env') });
 const mongoose = require('mongoose');
 const { updateBestSellerRankings } = require('./utils/updateBestSellers');
 const cron = require('node-cron');
@@ -20,6 +20,8 @@ const cron = require('node-cron');
 const app = express();
 const port = process.env.PORT || 8080;
 
+// Define custom React build path (adjust to match your actual structure)
+const REACT_BUILD_PATH = process.env.REACT_BUILD_PATH || path.join(__dirname, '../frontend/build');
 
 // Connect to MongoDB
 mongoose.connect(process.env.MONGO_URI, {
@@ -29,27 +31,29 @@ mongoose.connect(process.env.MONGO_URI, {
 .then(() => console.log('MongoDB connected successfully'))
 .catch(err => console.error('MongoDB connection error:', err));
 
+// Middleware
 app.use(cors());
 app.use(express.json({limit: '50mb'}));
 app.use(bodyParser.urlencoded({ extended: true }));
 
-app.use(express.static(path.join(__dirname, 'my-react-app', 'build')));
-app.use('/models', express.static(path.join(__dirname, 'public/models')));
-app.use('/textures', express.static(path.join(__dirname, 'public/textures')));
-
+// API routes - these should come BEFORE the static file middleware
 app.use('/api/users', AuthUserRoute);
 app.use('/api', productRoute);
 app.use('/api', cartRouter);
 app.use('/api/checkout', checkoutRoute);
 app.use('/api/orders', order);
 app.use('/api/webhooks', webhookRoute);
-app.use('/api', cake);
-//app.use('/api/3d-models', modelsRoutes);
+app.use('/api', cakeRoute);
 
-/*app.use('/protected',aunthenticateToken, (req, res) => {
-    res.send("Protected Route");
-    }
-);*/
+// Static files
+app.use(express.static(REACT_BUILD_PATH));
+app.use('/models', express.static(path.join(__dirname, 'public/models')));
+app.use('/textures', express.static(path.join(__dirname, 'public/textures')));
+
+// IMPORTANT: This catch-all route must come AFTER all API routes
+app.get('*', (req, res) => {
+  res.sendFile(path.join(REACT_BUILD_PATH, 'index.html'));
+});
 
 // Schedule best seller update - run daily at midnight
 cron.schedule('0 0 * * *', async () => {
@@ -83,8 +87,4 @@ updateBestSellerRankings().catch(err => {
 
 app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}/`);
-});
-
-app.get('/', (req, res) => {
-    res.send("API Working");
 });

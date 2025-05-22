@@ -17,7 +17,12 @@ export const ShopContextProvider = ({ children }) => {
     const [orders, setOrders] = useState([]);
     const [orderLoading, setOrderLoading] = useState(false);
     const [currentOrder, setCurrentOrder] = useState(null);
-    const delivery_fee = 38;
+      const [search, setSearch] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  
+    // Add these state variables at the top of your ShopContextProvider
+const [cartErrorCount, setCartErrorCount] = useState(0);
+const [lastCartFetchAttempt, setLastCartFetchAttempt] = useState(0);
 
     useEffect(() => {
         const storedToken = localStorage.getItem('Token');
@@ -134,108 +139,220 @@ export const ShopContextProvider = ({ children }) => {
     // Set user from localStorage if available
     // Fetch cart data from backend
 
-    const getUserCart = async (token) => {
-        console.log("Token changed:", token);
+    // Update the getUserCart function to handle invalid products
+
+    // Complete getUserCart function with proper error handling
+
+    const getUserCart = async (userToken) => {
+        // Skip if no user or too many recent errors
         if (!userName || !userName.id) {
-            console.log("Cannot fetch cart: No user ID available");
-            return;
+            console.warn("No user ID available, skipping cart fetch");
+            setLoading(false);
+            return [];
         }
         
-        console.log("Fetching cart for user:", userName.id);
+        // Rate limiting: Don't retry more than once per 5 seconds
+        const now = Date.now();
+        if (now - lastCartFetchAttempt < 5000 && cartErrorCount > 0) {
+            console.warn("Skipping cart fetch due to recent error, will retry later");
+            return [];
+        }
+        
+        setLastCartFetchAttempt(now);
         
         try {
             setLoading(true);
+            console.log(`Attempting to fetch cart for user ID: ${userName.id}`);
             
             const response = await axios.get(
-                `http://localhost:8080/api/getCart/${userName.id}`, 
-                {
-                    headers: { 
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
-                    }
+                `http://localhost:8080/api/getCart/${userName.id}`,
+                { 
+                    headers: { 'Authorization': `Bearer ${userToken || token}` },
+                    timeout: 8000 // Add timeout to prevent hanging requests
                 }
             );
             
             if (response.data.success) {
-                const { items, cartId, status } = response.data;
-                console.log("Cart items:", items);
-                setCartHeader({
-                    cartId: cartId || response.data.cartId,
-                    status: status || 'active'
-                });
+                // Reset error counter on success
+                if (cartErrorCount > 0) setCartErrorCount(0);
                 
-                // Rest of your existing code
-                const newCartItems = {};
+                // Validate that cartId exists before setting cartHeader
+                if (!response.data.cartId) {
+                    console.error("Cart ID is missing in response:", response.data);
+                    // Create a new cart ID if none exists
+                    const cartId = `temp_${Date.now()}_${userName.id}`;
+                    console.log("Created temporary cart ID:", cartId);
+                    
+                    // Create header with generated ID
+                    const headerData = {
+                        cartId: cartId,
+                        status: response.data.status || 'active',
+                        userId: userName.id,
+                        createdAt: new Date().toISOString()
+                    };
+                    
+                    setCartHeader(headerData);
+                    console.log("Setting cart header with generated ID:", headerData);
+                } else {
+                    // Create a proper cartHeader object from the response data
+                    const headerData = {
+                        cartId: response.data.cartId,
+                        status: response.data.status || 'active',
+                        userId: userName.id,
+                        createdAt: new Date().toISOString()
+                    };
+                    
+                    setCartHeader(headerData);
+                    console.log("Setting cart header:", headerData);
+                }
+                
+                // Process items from the correct property
+                const items = response.data.items || [];
+                
+                // Prepare local cart state
+                const cartObject = {};
                 const detailedItems = [];
                 
-                if (Array.isArray(items)) {
-                    items.forEach(item => {
-                        newCartItems[item.productId._id] = item.quantity;
-
-                        // Get image correctly from the Image array
-                        let imageUrl = null;
-                        if (item.productId.Image && Array.isArray(item.productId.Image) && item.productId.Image.length > 0) {
-                            imageUrl = item.productId.Image[0].url;
-                        } else if (item.productId.image) {
-                            // Fallback to legacy image field if available
-                            imageUrl = item.productId.image;
-                        }
-
+                // Process items
+                items.forEach(item => {
+                    // Process both regular products and custom cakes
+                    if (item.itemType === 'product' && item.productId) {
+                        // Regular product processing
+                        cartObject[item.productId] = item.quantity;
+                        
                         detailedItems.push({
                             cartItemId: item._id,
-                            productId: item.productId._id,
-                            name: item.productId.Name,
-                            price: item.productId.Price,
+                            productId: item.productId,
+                            name: item.name || 'Product',
+                            price: item.price,
                             quantity: item.quantity,
-                            image: imageUrl,
-                            description: item.productId.Description
+                            image: item.image || 'default-product.jpg',
+                            ProductImage: item.ProductImage,
+                            description: item.description || '',
+                            itemType: 'product',
+                            isUnavailable: item.isUnavailable
                         });
-                    });
-                    
-                    setCartItems(newCartItems);
-                    setDetailedCartItems(detailedItems);
-                    console.log("Cart loaded successfully");
+                    } 
+                    else if (item.itemType === 'cake_design') {
+                        // Custom cake handling
+                        const designId = item.cakeDesignId || item._id;
+                        cartObject[`cake_${designId}`] = item.quantity;
+                        
+                        detailedItems.push({
+                            cartItemId: item._id,
+                            cakeDesignId: designId,
+                            name: item.name || 'Custom Cake Design',
+                            price: item.price || 25,
+                            quantity: item.quantity,
+                            previewImage: item.previewImage || item.designSnapshot?.previewImage,
+                            image: item.image || item.previewImage || item.designSnapshot?.previewImage || 'default-cake-image.jpg',
+                            description: item.description || 'Custom cake design',
+                            cakeOptions: item.cakeOptions || { size: 'medium', flavor: 'vanilla' },
+                            itemType: 'cake_design',
+                            isUnavailable: item.isUnavailable
+                        });
+                    }
+                });
+                
+                setCartItems(cartObject);
+                setDetailedCartItems(detailedItems);
+                
+                // Return the cart items for functions that need them
+                return response.data.items || [];
+                
+            } else {
+                // Increment error counter
+                setCartErrorCount(prev => prev + 1);
+                console.error("Error in cart response:", response.data.message);
+                
+                // Only show toast for first error
+                if (cartErrorCount < 1) {
+                    return;
                 }
+                return [];
             }
         } catch (error) {
+            // Increment error counter
+            setCartErrorCount(prev => prev + 1);
             console.error("Error fetching cart:", error);
-            // Don't show error toast for 404 (no cart yet) or if server is down
-            if (error.response?.status !== 404) {
-                console.log("Error fetching cart:", userName.id);   
+            
+            // Only show toast for first few errors
+            if (cartErrorCount < 2) {
+                console.error("Error fetching cart:", error);
             }
+            return [];
         } finally {
             setLoading(false);
         }
     };
 
     // Add to cart function
-    const addToCart = async (productId) => {
+    const addToCart = async (productId, itemType, quantityOrCakeDesignId, cakeOptions, price, previewImage) => {
         if (!userName || !userName.id) {
             navigate('/login');
             return;
         }
         
         try {
-            // Find the product
-            const productToAdd = product.find(p => p.id === productId);
+            let productToAdd;
+            let newCartKey;
+            let requestData;
             
-            if (!productToAdd) {
-                return;
-            }
-            
-            // Determine new quantity
-            const currentQuantity = cartItems[productId] || 0;
-            const newQuantity = currentQuantity + 1;
-            
-            // Update backend
-            const response = await axios.post(
-                'http://localhost:8080/api/addToCart',
-                {
+            if (itemType === 'product') {
+                // Product handling - now with quantity parameter
+                productToAdd = product.find(p => p.id === productId);
+                
+                if (!productToAdd) {
+                    return;
+                }
+                
+                const currentQuantity = cartItems[productId] || 0;
+                // Use the provided quantity instead of always adding 1
+                const quantity = typeof quantityOrCakeDesignId === 'number' ? quantityOrCakeDesignId : 1;
+                const newQuantity = currentQuantity + quantity;
+                newCartKey = productId;
+                
+                // Request data for product
+                requestData = {
                     userId: userName.id,
                     productId: productId,
                     quantity: newQuantity,
-                    price: productToAdd.price
-                },
+                    price: productToAdd.price,
+                    itemType: 'product'
+                };
+            } else if (itemType === 'cake_design') {
+                // For cake designs, use the parameter as cakeDesignId
+                const cakeDesignId = quantityOrCakeDesignId;
+                
+                if (!cakeDesignId) {
+                    console.error("Cake design ID is required");
+                    return;
+                }
+                
+                // New quantity for cake design
+                const uniqueKey = `cake_${cakeDesignId}`;
+                const currentQuantity = cartItems[uniqueKey] || 0;
+                const newQuantity = currentQuantity + 1;  // Always add 1 for cake designs
+                newCartKey = uniqueKey;
+                
+                // Request data for cake design
+                requestData = {
+                    userId: userName.id,
+                    cakeDesignId: cakeDesignId,
+                    quantity: newQuantity,
+                    price: price,
+                    itemType: 'cake_design',
+                    cakeOptions: cakeOptions,
+                    previewImage: previewImage
+                };
+            } else {
+                console.error("Invalid item type:", itemType);
+                return;
+            }
+            
+            const response = await axios.post(
+                'http://localhost:8080/api/addToCart',
+                requestData,
                 {
                     headers: { 
                         'Authorization': `Bearer ${token}`,
@@ -245,16 +362,89 @@ export const ShopContextProvider = ({ children }) => {
             );
             
             if (response.data.success) {
-                // Update local state
+                // Log the actual response data for debugging
+                console.log("Add to cart response:", response.data);
+                
+                // Option 1: Just update local state and wait for getUserCart
                 const updatedItems = {...cartItems};
-                updatedItems[productId] = newQuantity;
+                updatedItems[newCartKey] = requestData.quantity;
                 setCartItems(updatedItems);
+                
+                // Add the new item to detailedCartItems directly for immediate UI update
+                if (itemType === 'product' && productToAdd) {
+                    // Product UI update - unchanged
+                    const existingItem = detailedCartItems.find(
+                        item => item.productId === productId && item.itemType === 'product'
+                    );
+                    
+                    if (existingItem) {
+                        // Update quantity of existing item
+                        setDetailedCartItems(detailedCartItems.map(item => 
+                            (item.productId === productId && item.itemType === 'product')
+                                ? {...item, quantity: requestData.quantity}
+                                : item
+                        ));
+                    } else {
+                        // Add new item to detailed items
+                        setDetailedCartItems([
+                            ...detailedCartItems,
+                            {
+                                cartItemId: response.data.cartItem._id,
+                                productId: productId,
+                                name: productToAdd.name,
+                                price: productToAdd.price,
+                                quantity: requestData.quantity,
+                                image: productToAdd.image,
+                                description: productToAdd.description,
+                                itemType: 'product'
+                            }
+                        ]);
+                    }
+                } 
+                // NEW BLOCK: Similar immediate UI update for cake designs
+                else if (itemType === 'cake_design') {
+                    const existingItem = detailedCartItems.find(
+                        item => item.cakeDesignId === cakeDesignId && item.itemType === 'cake_design'
+                    );
+                    
+                    if (existingItem) {
+                        // Update quantity of existing cake design
+                        setDetailedCartItems(detailedCartItems.map(item => 
+                            (item.cakeDesignId === cakeDesignId && item.itemType === 'cake_design')
+                                ? {...item, quantity: requestData.quantity}
+                                : item
+                        ));
+                    } else {
+                        // Add new cake design to detailed items
+                        const designName = cakeOptions?.name || "Custom Cake Design";
+                        setDetailedCartItems([
+                            ...detailedCartItems,
+                            {
+                                cartItemId: response.data.cartItem._id,
+                                cakeDesignId: cakeDesignId, // Store the actual ID here
+                                name: `Custom Cake: ${designName}`,
+                                price: price,
+                                quantity: requestData.quantity,
+                                previewImage: previewImage, // Store preview image
+                                image: previewImage || 'default-cake-image.jpg', // For backwards compatibility
+                                description: 'Custom cake design',
+                                cakeOptions: cakeOptions || {},
+                                itemType: 'cake_design'
+                            }
+                        ]);
+                    }
+                }
+                
+              
+                setTimeout(() => {
+                    getUserCart(token);
+                }, 300);
+          
             }
         } catch (error) {
             console.error("Error adding to cart:", error);
         }
     };
-    // Delete item from cart
 
     const deleteItemsCart = async (itemId) => {
         try {
@@ -287,7 +477,14 @@ export const ShopContextProvider = ({ children }) => {
             if (response.data && response.data.success) {
                 // Create a copy of cart items AFTER confirmation from server
                 const updatedCartItems = {...cartItems};
-                delete updatedCartItems[itemToDelete.productId];
+                
+                // Handle both product and cake design items
+                if (itemToDelete.itemType === 'product' && itemToDelete.productId) {
+                    delete updatedCartItems[itemToDelete.productId];
+                } else if (itemToDelete.itemType === 'cake_design' && itemToDelete.cakeDesignId) {
+                    delete updatedCartItems[`cake_${itemToDelete.cakeDesignId}`];
+                }
+                
                 setCartItems(updatedCartItems);
                 
                 // Also update detailed items array
@@ -300,14 +497,44 @@ export const ShopContextProvider = ({ children }) => {
                 getUserCart(token);
             }
         } catch (error) {
-            console.error("Server sync failed:", error);
             
             // Refresh the cart to resync with the server
             getUserCart(token);
         }
     };
 
-    const clearCart = async () => {
+    // Helper function to add a custom cake design to cart
+    const addCustomCakeToCart = async (cakeDesign, options, price) => {
+        if (!userName || !userName.id) {
+            navigate('/login');
+            return;
+        }
+        
+        if (!cakeDesign || !cakeDesign._id) {
+            return;
+        }
+        
+        try {
+            // Add custom cake to cart
+            await addToCart(
+                null, // No product ID for cake designs
+                'cake_design', 
+                cakeDesign._id, 
+                options, 
+                price,
+                cakeDesign.previewImage // Add the preview image directly
+            );
+            
+            // Add this: Refresh cart data from server
+            await getUserCart();
+            
+            navigate('/cart');
+        } catch (error) {
+            console.error("Error adding custom cake to cart:", error);
+                }
+    };
+
+     const clearCart = async () => {
         try {
           setCartItems({});
           setCartCount(0);
@@ -323,6 +550,7 @@ export const ShopContextProvider = ({ children }) => {
           console.error('Error clearing cart:', error);
         }
       };
+      
     // Update item quantity
     const updateQuantity = async (productId, newQuantity) => {
         try {
@@ -437,39 +665,72 @@ export const ShopContextProvider = ({ children }) => {
         }
     };
 
-    const fetchUserOrders = async () => {
-        if (!token || !userName || !userName.id) {
-            console.log("Cannot fetch orders: No authenticated user");
-            return;
+   const fetchUserOrders = async () => {
+  if (!token || !userName || !userName.id) {
+    console.log("Cannot fetch orders: No authenticated user");
+    toast.error("Please log in to view your orders");
+    navigate('/login');
+    return;
+  }
+  
+  try {
+    setOrderLoading(true);
+    
+    const response = await axios.get(
+      `http://localhost:8080/api/orders/myorders/${userName.id}`,
+      {
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
         }
-        
-        try {
-            setOrderLoading(true);
-            
-            const response = await axios.get(
-                `http://localhost:8080/api/orders/myorders/${userName.id}`,
-                {
-                    headers: { 
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
-                    }
-                }
-            );
-            
-            if (response.data) {
-                console.log("Orders fetched successfully:", response.data);
-    setOrders(response.data.orders || []);
-            } else {
-                console.error("Failed to load orders");
-                setOrders([]);
-            }
-        } catch (error) {
-            console.error("Error fetching orders:", error);
-            setOrders([]);
-        } finally {
-            setOrderLoading(false);
-        }
-    };
+      }
+    );
+    
+    if (response.data && response.data.success) {
+      console.log("Orders fetched successfully:", response.data);
+      
+      // Set orders state with the formatted orders array
+      setOrders(response.data.orders || []);
+      
+      // Track orders with custom cakes separately if needed
+      const customCakeOrders = response.data.orders.filter(order => order.hasCustomCakes);
+      if (customCakeOrders.length > 0) {
+        console.log(`You have ${customCakeOrders.length} orders with custom cakes`);
+        // You could set these in a separate state if needed:
+        // setCustomCakeOrders(customCakeOrders);
+      }
+    } else {
+      console.error("Failed to load orders:", response.data?.message || "Unknown error");
+      toast.error("Could not load your orders");
+      setOrders([]);
+    }
+  } catch (error) {
+    console.error("Error fetching orders:", error);
+    
+    // More detailed error handling
+    if (error.response) {
+      // The request was made and the server responded with a status code
+      // that falls out of the range of 2xx
+      const status = error.response.status;
+      if (status === 401 || status === 403) {
+        toast.error("Your session has expired. Please log in again.");
+        // Optionally logout user here
+      } else {
+        toast.error(`Error: ${error.response.data?.message || "Failed to load orders"}`);
+      }
+    } else if (error.request) {
+      // The request was made but no response was received
+      toast.error("Server not responding. Please try again later.");
+    } else {
+      // Something happened in setting up the request
+      toast.error("Error loading orders");
+    }
+    
+    setOrders([]);
+  } finally {
+    setOrderLoading(false);
+  }
+};
 
     useEffect(() => {
         if (token && userName && userName.id) {
@@ -494,12 +755,14 @@ export const ShopContextProvider = ({ children }) => {
         setDetailedCartItems,
         navigate,
         addToCart,
+  
+        addCustomCakeToCart,
+
         updateQuantity,
         deleteItemsCart,
         getCartAmount,
         getCartCount,
         getUserCart,
-        delivery_fee,
         cartHeader,
         clearCart,
         orders,
@@ -507,6 +770,12 @@ export const ShopContextProvider = ({ children }) => {
         currentOrder,
         fetchUserOrders,
         getOrderById,
+
+        search,
+        setSearch,  // Make sure this is included
+        showSearch,
+        setShowSearch, 
+
     };
 
     return (

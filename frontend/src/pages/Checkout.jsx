@@ -5,7 +5,8 @@ import axios from 'axios';
 import { toast } from 'react-toastify';
 
 const Checkout = () => {
-  const { token, currency, userName, detailedCartItems, cartHeader } = useContext(ShopContext);
+  const { token, currency, userName, detailedCartItems, cartHeader, setCartHeader } = useContext(ShopContext);
+  
   const navigate = useNavigate();
   
   const [loading, setLoading] = useState(true);
@@ -14,7 +15,7 @@ const Checkout = () => {
   const { cartId } = useParams();
   const [checkoutId, setCheckoutId] = useState(''); // Add this state for tracking
   
-  // Add checkout abandonment tracking
+  // Add checkout abandonment tracki  ng
   useEffect(() => {
     // Only run if we have a cartId and are in checkout process
     if (!cartHeader?.cartId || !processingCheckout) return;
@@ -148,7 +149,7 @@ const Checkout = () => {
   // Check for login token
   useEffect(() => {
     if (!token) {
-      toast.error("Please login to access checkout");
+     console.log("Please login to access checkout");
       navigate('/login');
       return;
     }
@@ -193,7 +194,7 @@ const Checkout = () => {
     // Check shipping details
     for (const key in shippingDetails) {
       if (!shippingDetails[key]) {
-        toast.error(`Please fill in your shipping ${key}`);
+       console.log(`Please fill in your shipping ${key}`);
         return false;
       }
     }
@@ -202,7 +203,7 @@ const Checkout = () => {
     if (!sameAsShipping) {
       for (const key in billingDetails) {
         if (!billingDetails[key]) {
-          toast.error(`Please fill in your billing ${key}`);
+         console.log(`Please fill in your billing ${key}`);
           return false;
         }
       }
@@ -216,9 +217,18 @@ const Checkout = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
+    console.log("Submitting checkout with cart ID:", cartHeader);
+
     if (!token) {
-      toast.error("Please login to proceed");
+      console.log("Please login to proceed");
       navigate('/login?redirect=/checkout');
+      return;
+    }
+    
+    // Check if cart header exists
+    if (!cartHeader || !cartHeader.cartId ) {
+      console.log("No active cart found. Please try again or add items to your cart.");
+      navigate('/cart');
       return;
     }
     
@@ -239,7 +249,7 @@ const Checkout = () => {
       const paymentMethod = selectedPaymentMethod;
       
       if (paymentMethod === 'cod') {
-        // COD flow remains unchanged
+        // COD flow
         const orderResponse = await axios.post(
           `${API_URL}/api/orders/createOrder`,
           {
@@ -260,10 +270,9 @@ const Checkout = () => {
         );
         
         if (orderResponse.data.success) {
-          toast.success('Order placed successfully!');
           navigate(`/orders/${orderResponse.data.orderId}`);
         } else {
-          toast.error(orderResponse.data.message || "Failed to create order");
+          console.log(orderResponse.data.message || "Failed to create order");
         }
       } else {
         try {
@@ -337,14 +346,14 @@ const Checkout = () => {
             console.log("Redirecting to:", response.data.data.checkoutUrl);
             window.location.href = response.data.data.checkoutUrl;
           } else {
-            toast.error(response.data.message || "Failed to create checkout session");
+            console.log(response.data.message || "Failed to create checkout session");
           }
         } catch (error) {
           console.error("Checkout error:", error);
           if (error.response) {
             console.error("Error response:", error.response.data);
           }
-          toast.error(error.response?.data?.message || "Error processing checkout");
+         console.log(error.response?.data?.message || "Error processing checkout");
         }
       }
     } catch (error) {
@@ -352,7 +361,7 @@ const Checkout = () => {
       if (error.response) {
         console.error("Error response:", error.response.data);
       }
-      toast.error(error.response?.data?.message || "Error processing checkout");
+      console.log(error.response?.data?.message || "Error processing checkout");
     } finally {
       setProcessingCheckout(false);
     }

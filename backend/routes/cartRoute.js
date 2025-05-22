@@ -2,17 +2,22 @@ const express = require('express');
 const cartRouter = express.Router();
 const { 
        AddToCart,
+       AddCakeToCart,
        GetCart,
        DeleteCart,
        UpdateCartItemQuantity,
        ClearCart,
        UpdateCartStatus
 } = require('../controllers/userCart');
-const verifyToken = require('../middleware/tokens');
 
+const verifyToken = require('../middleware/tokens');
 cartRouter.post('/addToCart', verifyToken, AddToCart);
 
+cartRouter.post('/cake-design', verifyToken, AddCakeToCart);
+
+
 cartRouter.get('/getCart/:userId', verifyToken, GetCart);
+
 
 cartRouter.delete('/deleteFromCart/:userId/:itemId', verifyToken, DeleteCart);
 

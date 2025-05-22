@@ -8,24 +8,53 @@ const BaseStyleOptions = () => {
     {
       id: "ROUNDED",
       name: "Rounded Cake",
-      description: "Classic rounded edges for a soft, elegant look",
+      path: "/tresD-SE/CAKE B/CAKE_B_1L_RENAME.glb", // <-- correct path
+      position: [0, 0, 0],
+      color: { primary: "#fff0f5" },
+      targetedMeshName: ["RoundedBase"],
+      textures: new Map(),
       price: 0.0,
+      description: "Classic rounded edges for a soft, elegant look",
     },
+
     {
       id: "FLAT",
       name: "Flat Cake",
-      description: "Modern sharp edges for a contemporary style",
+      path: "/tresD-SE/CAKE C/CAKE_C_1L_RENAME.glb",
+      position: [0, 0, 0],
+      color: { primary: "#fffff" },
+      targetedMeshName: ["FlatBase"],
+      textures: new Map(),
       price: 0.0,
+      description: "Modern sharp edges for a contemporary style",
     },
   ];
 
   const handleSelectStyle = (styleId) => {
-    dispatch({ type: "SET_BASE_STYLE", payload: styleId });
+    const style = styles.find((s) => s.id === styleId);
+    dispatch({
+      type: "SET_BASE_STYLE",
+      payload: styleId,
+      cakeModelProps: style, // Pass all props needed for RenderCake
+    });
   };
+
+  const model = cakeState.cakeModel
+    ? {
+        // Extract the specific properties you need
+        path: cakeState.cakeModel.path || "",
+        name: cakeState.cakeModel.name || "",
+        position: cakeState.cakeModel.position || [0, 0, 0],
+        color: cakeState.cakeModel.color || "#FFFFFF",
+      }
+    : null;
 
   return (
     <div>
       <h2 className="text-xl font-semibold mb-4">SELECT BASE STYLE</h2>
+      {/* Render the 3D cake model here */}
+      <div className="flex justify-center mb-6">
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {styles.map((style) => (
           <div

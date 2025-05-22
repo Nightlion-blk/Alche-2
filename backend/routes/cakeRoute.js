@@ -1,17 +1,23 @@
 const express = require('express');
-const cake = express.Router();
-const {
-    createCake,
-    getAllCakes,
-    getCakeById,
-    updateCake,
-    deleteCake
-} = require('../controllers/cakeController');
+const cakeRoute = express.Router();
+const verifyToken = require('../middleware/tokens');
 
-cake.post('/cake', createCake); // Create a new cake
-cake.get('/all', getAllCakes); // Get all cakes
-cake.get('/:id', getCakeById); // Get a cake by ID
-cake.put('/:id', updateCake); // Update a cake by ID
-cake.delete('/:id', deleteCake); // Delete a cake by ID
+// ONLY use this import approach
+const controller = require('../controllers/cakeControllers');
+console.log('Available controllers:', Object.keys(controller));
 
-module.exports = cake;
+// Define routes using the controller object
+cakeRoute.post('/createCake', verifyToken, controller.createOrUpdateCakeDesign);
+
+// Get all cake designs (with filters)
+cakeRoute.get('/getAll', controller.getAllCakeDesigns);
+
+// Get a user's cake designs
+cakeRoute.get('/cake/:userId', verifyToken, controller.getUserCakeDesigns); 
+
+// Get, update, delete specific cake design
+cakeRoute.get('/userCake/:id', controller.getCakeDesignById);
+cakeRoute.put('/update/:id', verifyToken, controller.updateCakeDesign);
+cakeRoute.delete('/delete/:id', verifyToken, controller.deleteCakeDesign);
+
+module.exports = cakeRoute;

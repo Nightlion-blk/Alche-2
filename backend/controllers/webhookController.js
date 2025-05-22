@@ -1,6 +1,8 @@
 const mongoose = require('mongoose');
 const { CartHeader, CartItem } = require('../models/cart');
 const Orders = require('../models/order');
+const Products = require('../models/product'); // Note: match the actual model name (Products vs Product)
+const CakeDesign = require('../models/cakeDesign'); // Add this for cake designs
 
 exports.handlePayMongoWebhook = async (req, res) => {
   console.log('💰 Webhook received at:', new Date().toISOString());
@@ -56,7 +58,9 @@ exports.handlePayMongoWebhook = async (req, res) => {
       }
       
       // Get cart items for additional information
-      const cartItems = await CartItem.find({ cartId }).populate('productId');
+      const cartItems = await CartItem.find({ cartId })
+        .populate('productId')
+        .populate('cakeDesignId');
       
       // Extract payment details
       const paymentMethod = checkoutAttrs.payment_method_used || 'unknown';
@@ -69,67 +73,68 @@ exports.handlePayMongoWebhook = async (req, res) => {
       // Extract line items for order details
       const lineItems = checkoutAttrs.line_items || [];
       
-      // Extract billing/shipping info
+      // Extract billing/shipping info - Add these two lines to fix the error
       const billing = checkoutAttrs.billing || {};
       const shipping = checkoutAttrs.shipping || billing; // Fallback to billing if shipping is not available
       
-      // Check if order already exists
-      const existingOrder = await Orders.findOne({ "Payment.PaymentReference": checkoutId });
+      // Create order details
+      const orderDetails = [];
       
-      if (existingOrder) {
-        console.log(`⚠️ Order already exists: ${existingOrder.OrderID}`);
-        
-        // Update payment status
-        existingOrder.Payment.PaymentStatus = 'Paid';
-        existingOrder.Payment.PaymentDate = new Date();
-        existingOrder.Status = 'Pending'; // Use a value from your enum
-        await existingOrder.save();
-        
-        // Update cart status
-        cartHeader.status = 'completed';
-        cartHeader.updated_at = new Date();
-        await cartHeader.save();
-        
-        return res.status(200).send('Order updated successfully');
-      }
-      
-      // Create order details with required cartItemID
-      const orderDetails = lineItems.map(item => {
-        // Find matching cart item, using name for matching
-        const matchingCartItem = cartItems.find(cartItem => 
-          cartItem.productId.Name === item.name || 
-          cartItem.productId.name === item.name
-        );
-        
-        // Get product image from your database first
+      // Process each cart item (instead of PayMongo line items)
+      for (const cartItem of cartItems) {
+        let productName = 'Unknown Product';
         let productImage = 'default-product-image.jpg';
+        let productId = null;
+        let itemDescription = '';
         
-        if (matchingCartItem?.productId) {
-          if (matchingCartItem.productId.Image && 
-              Array.isArray(matchingCartItem.productId.Image) && 
-              matchingCartItem.productId.Image.length > 0) {
-            productImage = matchingCartItem.productId.Image[0].url || matchingCartItem.productId.Image[0];
-          } else if (matchingCartItem.productId.image) {
-            productImage = matchingCartItem.productId.image;
+        if (cartItem.itemType === 'product' && cartItem.productId) {
+          // Handle regular product
+          productName = cartItem.productId.Name || cartItem.ProductName || 'Product';
+          productId = cartItem.productId._id;
+          itemDescription = cartItem.productId.Description || '';
+          
+          // Get product image
+          if (cartItem.productId.Image && 
+              Array.isArray(cartItem.productId.Image) && 
+              cartItem.productId.Image.length > 0) {
+            productImage = cartItem.productId.Image[0].url || cartItem.productId.Image[0];
+          } else if (cartItem.productId.image) {
+            productImage = cartItem.productId.image;
+          } else if (cartItem.ProductImage) {
+            productImage = cartItem.ProductImage;
+          }
+          
+        } else if (cartItem.itemType === 'cake_design' && cartItem.cakeDesignId) {
+          // Handle cake design
+          productName = cartItem.cakeDesignId.name || 'Custom Cake Design';
+          productId = cartItem.cakeDesignId._id;
+          itemDescription = cartItem.cakeDesignId.description || 'Custom cake design';
+          
+          // Get cake design preview image
+          if (cartItem.cakeDesignId.previewImage) {
+            productImage = cartItem.cakeDesignId.previewImage;
+          } else if (cartItem.ProductImage) {
+            productImage = cartItem.ProductImage;
           }
         }
         
-        // Only use PayMongo image as final fallback
-        if (productImage === 'default-product-image.jpg' && item.images?.[0]) {
-          productImage = item.images[0];
-        }
-        
-        // FIXED - Use correct PascalCase field names that match your schema
-        return {
-          cartItemID: matchingCartItem?._id || new mongoose.Types.ObjectId(),
-          ProductID: matchingCartItem?.productId?._id || new mongoose.Types.ObjectId(),
-          ProductName: item.name || 'Product',
-          Quantity: parseInt(item.quantity) || 1,
-          SubTotal: (item.amount / 100) * (parseInt(item.quantity) || 1),
+        // Create order detail entry
+        orderDetails.push({
+          cartItemID: cartItem._id,
+          ProductID: productId || new mongoose.Types.ObjectId(),
+          ProductName: productName,
+          Quantity: cartItem.quantity || 1,
+          SubTotal: (cartItem.price || 0) * (cartItem.quantity || 1),
           ProductImage: productImage,
-          Description: item.description || ""
-        };
-      });
+          Description: itemDescription,
+          itemType: cartItem.itemType, // Store item type to identify cake designs
+          
+          // Add these conditional fields based on item type
+          ...(cartItem.itemType === 'cake_design' ? {
+            cakeDesignID: cartItem.cakeDesignId  // Add the required field for cake designs
+          } : {})
+        });
+      }
       
       // Calculate total from line items
       const totalAmount = lineItems.reduce((sum, item) => 
@@ -170,15 +175,49 @@ exports.handlePayMongoWebhook = async (req, res) => {
         }
       });
       
+      // After the order is created and saved successfully
       await newOrder.save();
       console.log(`✅ Created new order: ${newOrder.OrderID}`);
       
-      // Update cart status to completed
-      cartHeader.status = 'completed';
-      cartHeader.updated_at = new Date();
-      await cartHeader.save();
+      // Enhanced cart cleanup - make sure it always runs
+      let cartDeleted = false;
       
-      console.log(`✅ Updated cart ${cartHeader.cartId} status to completed`);
+      try {
+        // First verify the cart exists
+        const cartExists = await CartHeader.findOne({ cartId: cartHeader.cartId });
+        if (!cartExists) {
+          console.log(`⚠️ Cart ${cartHeader.cartId} already deleted or not found`);
+          cartDeleted = true;
+        } else {
+          // First delete all cart items associated with this cart
+          const deletedItems = await CartItem.deleteMany({ cartId: cartHeader.cartId });
+          console.log(`✅ Deleted ${deletedItems.deletedCount} cart items for cart: ${cartHeader.cartId}`);
+          
+          // Then delete the cart header
+          const deletedHeader = await CartHeader.deleteOne({ cartId: cartHeader.cartId });
+          console.log(`✅ Deleted cart header for cart: ${cartHeader.cartId} (${deletedHeader.deletedCount} records)`);
+          
+          cartDeleted = deletedHeader.deletedCount > 0;
+        }
+      } catch (deleteError) {
+        console.error('Error deleting cart data:', deleteError);
+        // We'll handle the fallback below
+      }
+      
+      // If deletion failed, update the cart status instead
+      if (!cartDeleted) {
+        try {
+          const cartToUpdate = await CartHeader.findOne({ cartId: cartHeader.cartId });
+          if (cartToUpdate) {
+            cartToUpdate.status = 'completed';
+            cartToUpdate.updated_at = new Date();
+            await cartToUpdate.save();
+            console.log(`⚠️ Could not delete cart, updated status to completed instead`);
+          }
+        } catch (updateError) {
+          console.error('Failed to update cart status as fallback:', updateError);
+        }
+      }
       
       // Update product sales data and inventory
       for (const detail of orderDetails) {
@@ -187,7 +226,7 @@ exports.handlePayMongoWebhook = async (req, res) => {
           const productId = detail.ProductID;
           if (!mongoose.Types.ObjectId.isValid(productId)) continue;
           
-          const product = await require('../models/product').findById(productId);
+          const product = await Products.findById(productId);
           if (!product) {
             console.log(`⚠️ Product not found: ${productId}`);
             continue;

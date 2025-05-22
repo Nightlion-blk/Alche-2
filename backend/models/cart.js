@@ -86,32 +86,51 @@ cartHeaderSchema.index({ status: 1, 'checkoutData.expiresAt': 1 });
 
 // Cart Item Schema (stores individual items in a cart)
 const cartItemSchema = new mongoose.Schema({
-    cartId: {
-      type: String,
-      required: true
-    },
-    productId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Products',
-      required: true
-    },
-    ProductName: {
-      type: String,
-      required: true
-    },
-    ProductImage: {
-      type: String,
-      required: true
-    },
-    quantity: {
-      type: Number,
-      required: true,
-      min: 1
-    },
-    price: {
-      type: Number,
-      required: true
+  cartId: {
+    type: String,
+    required: true
+  },
+
+  productId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Products',
+    // Make it optional to support cake designs
+    required: function() {
+      return !this.cakeDesignId;
     }
+  },
+
+  cakeDesignId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'CakeDesign',
+    required: function() {
+      return !this.productId;
+    }
+  },
+
+  itemType: {
+    type: String,
+    enum: ['product', 'cake_design'],
+    required: true
+  },
+
+  ProductName: String,
+  ProductImage: String,
+  quantity: {
+    type: Number,
+    required: true,
+    min: 1
+  },
+  price: {
+    type: Number,
+    required: true
+  },
+  // Store cake customization options if needed
+  cakeOptions: {
+    size: String,
+    flavor: String,
+    additionalNotes: String
+  }
 });
 
 // Export the models

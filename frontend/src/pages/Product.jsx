@@ -16,7 +16,9 @@ const Product = ({ isOpen, onClose, productId }) => {
   const [isVisible, setIsVisible] = useState(false);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
 
-  // Close modal when clicking outside
+  // ⚠️ IMPORTANT: All useEffect hooks must be declared here, in the same order every time
+  
+  // 1. First, your existing click outside handler
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (modalRef.current && !modalRef.current.contains(event.target)) {
@@ -33,7 +35,7 @@ const Product = ({ isOpen, onClose, productId }) => {
     };
   }, [isOpen, onClose]);
   
-  // Fetch product data when modal opens
+  // 2. Your existing product data fetch effect
   useEffect(() => {
     if (isOpen && productId) {
       fetchProductData();
@@ -46,6 +48,44 @@ const Product = ({ isOpen, onClose, productId }) => {
     };
   }, [isOpen, productId]);
   
+  // 3. Add the cart sync effect HERE, not later in the component
+useEffect(() => {
+  // Only fetch when necessary
+  if (isOpen && token && productData) {
+    // Add a small random delay to prevent exact simultaneous calls
+    const delay = Math.random() * 400;
+    
+    const fetchTimeout = setTimeout(() => {
+      // Use a flag in localStorage to prevent multiple components
+      // from calling getUserCart at the same time
+      const lastFetchTime = localStorage.getItem('lastCartFetch');
+      const now = Date.now();
+      
+      if (!lastFetchTime || now - parseInt(lastFetchTime) > 2000) {
+        // Set the flag before calling
+        localStorage.setItem('lastCartFetch', now.toString());
+        
+        // Now call getUserCart
+        getUserCart()
+          .then(cartItems => {
+            if (Array.isArray(cartItems) && productData) {
+              const existingItem = cartItems.find(item => 
+                item.productId === productData.id && item.itemType === 'product'
+              );
+              
+              if (existingItem && existingItem.quantity !== quantity) {
+                console.log(`Syncing quantity for ${productData.name}`);
+                addToCart(productData.id, 'product', quantity, true);
+              }
+            }
+          })
+          .catch(err => console.log('Cart sync error:', err.message));
+      }
+    }, delay);
+    
+    return () => clearTimeout(fetchTimeout);
+  }
+}, [isOpen, token, productData, quantity]);
   // Prevent scrolling when modal is open
   useEffect(() => {
     if (isOpen) {
@@ -79,12 +119,12 @@ const Product = ({ isOpen, onClose, productId }) => {
           setProductData(formattedProduct);
           setSelectedImageIndex(0);
         } else {
-          toast.error('Product not found');
+         console.log('Product not found');
         }
       }
     } catch (error) {
       console.error('Error fetching product:', error);
-      toast.error('Failed to load product details');
+      console.log('Failed to load product details');
     } finally {
       setLoading(false);
     }
@@ -105,25 +145,24 @@ const Product = ({ isOpen, onClose, productId }) => {
       }
 
       // Show loading toast
+      console.log('Adding to cart...', { autoClose: false, toastId: 'adding-to-cart' });
       
-      // First add all items to cart and wait for completion
-      const addPromises = [];
-      for (let i = 0; i < quantity; i++) {
-        addPromises.push(addToCart(productData.id));
-      }
-      await Promise.all(addPromises);
+      // Pass quantity directly instead of using a loop
+      await addToCart(productData.id, 'product', quantity);
       
-      // Then update cart count and get updated cart
-      await getCartCount();
       await getUserCart(token);
+      // Update cart count
+      await getCartCount();
       
       // Update toast to success
-      alert('Product added to cart successfully!');
+      toast.dismiss('adding-to-cart');
+     console.log(`${quantity} ${quantity > 1 ? 'items' : 'item'} added to cart`);
       
       setQuantity(1);
       onClose(); // Close modal after adding to cart
     } catch (error) {
       console.error('Error adding to cart:', error);
+     console.log('Failed to add product to cart');
     }
   };
   // Get the current main image URL to display
@@ -143,15 +182,15 @@ const Product = ({ isOpen, onClose, productId }) => {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-2 sm:p-4">
       <div 
         ref={modalRef}
-        className={`bg-white rounded-lg w-full max-w-4xl max-h-[90vh] overflow-y-auto relative transition-opacity duration-300 ${isVisible ? 'opacity-100' : 'opacity-0'}`}
+        className={`bg-white rounded-lg w-full max-w-[95vw] sm:max-w-4xl max-h-[80vh] mt-16 sm:mt-0 overflow-y-auto relative transition-opacity duration-300 ${isVisible ? 'opacity-100' : 'opacity-0'}`}
       >
         {/* Close button */}
         <button 
           onClick={onClose}
-          className="absolute top-4 right-4 text-gray-500 hover:text-gray-800 z-10"
+          className="absolute right-2 top-2 sm:right-4 sm:top-4 text-gray-500 hover:text-gray-800 z-20"
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -226,9 +265,8 @@ const Product = ({ isOpen, onClose, productId }) => {
                   <button
                     onClick={() => {
                       if (!token) {
-                        toast.error('Please login to add items to cart');
+                        console.log('Please login to add items to cart');
                       } else {
-                        getUserCart(token);
                         handleAddToCart();
                       }
                     }}
